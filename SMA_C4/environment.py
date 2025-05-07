@@ -1,8 +1,21 @@
 '''
-    RL environment with a GPR as an internally maintained surrogate.
-    The immediate rewards are from the surrogate. Only after the RL
-    proposition will the surrogate be updated to capture the current
-    relationship between the experimented xs and ys.
+"""
+This script serves as the ground truth environment for Bayesian Optimization (BO) in shape memory alloy (SMA) design.
+Its main functions include:
+
+1. Property Prediction:
+   - Uses pre-trained neural network models to predict key SMA properties:
+     * Enthalpy of transformation
+     * Martensite peak temperature (Mp)
+     * Austenite peak temperature (Ap)
+   - These predictions serve to compose the objective function (figure of merit, FOM) for BO optimization
+
+2. Composition Space Definition:
+   - Defines valid composition ranges for alloying elements (Ti, Ni, Cu, Hf, etc.)
+
+This environment acts as a "ground truth" for expensive physical experiments,
+allowing benchmark of Bayesian Optimization (BO) algorithms.
+"""
 '''
 from __future__ import annotations
 from collections import namedtuple
@@ -54,6 +67,7 @@ TA_MIN, TA_MAX = 0., 0.05
 NB_MIN, NB_MAX = 0., 0.20
 V_MIN, V_MAX = 0., 0.1
 
+""" composition limit ensemble """
 COMP_LIMITS =(
     CompositionLimit(TI_MIN, TI_MAX),
     CompositionLimit(NI_MIN, NI_MAX),
@@ -101,10 +115,11 @@ ACTIONS_TO_INDEX_DICT = dict(zip(ALL_ACTIONS, range(ALL_ACTIONS_COUNT)))
 ROUND_DIGIT = 3
 STATE_DELIMETER_CHAR = '*'
 
+
+# for path compatibility
 def os_path(path: str):
     return path.replace('\\\\', '\\').replace('\\', os.sep).replace('/', os.sep)
 
-# TODO move get_ground_truth_func and get_mo_ground_truth_func -> utils.py
 def get_ground_truth_func(model_path = 'model\model.pth', data_path = 'model\data.pth'):
     '''
         Return the func that maps a composition -> a mechanical property (mp / en).
@@ -144,36 +159,74 @@ def get_ground_truth_func(model_path = 'model\model.pth', data_path = 'model\dat
 
 def get_mo_ground_truth_func():
     '''
-        Build a linearly compounded multi-objective (MO) 'property' predicting function.
+    Build a ground truth function (figure of merit, FOM) for Bayesian optimization
+    
+    This function creates a composite objective function that combines multiple 
+    property predictions (enthalpy, transformation temperatures) into a single scalar value.
+    The combined objective prioritizes:
+    1. Higher enthalpy (energy storage capacity)
+    2. Narrower transformation hysteresis (difference between Ap and Mp)
+    3. Transformation temperatures centered around a target temperature (300K)
+    
+    This serves as the "ground truth" for Bayesian optimization, mimicking
+    experimental measurements that would be performed in real materials discovery.
+    
+    Returns:
+        Callable function that takes composition as input and returns scalar objective value
     '''
+    # Load individual property prediction models
     _en_func = get_ground_truth_func('model\\en_model.pth', 'model\\en_data.pth',)
     _mp_func = get_ground_truth_func('model\\mp_model.pth', 'model\\mp_data.pth',)
     _ap_func = get_ground_truth_func('model\\ap_model.pth', 'model\\ap_data.pth',)
 
+    # Target transformation temperature (room temperature in K)
     _dest_T = 300
 
-    ''' normalizing scales for Enthalpy, Mp, and Ap '''
+    # Normalization scales for objective components
+    # These control the relative importance of each property in the combined objective
     _mo_scale = np.array([
-        35.,    # en
-        50.,    # (ap - mp)
-        50.,    # distance to destination temperature
+        35.,    # Enthalpy scale (J/g)
+        50.,    # Transformation hysteresis scale (K)
+        50.,    # Temperature offset from target scale (K)
     ])
 
     def _mo_func(x):
+        '''
+        Multi-objective function for alloy composition evaluation
+        
+        This function evaluates a composition by predicting multiple properties
+        and combining them into a single objective value to be maximized.
+        
+        Args:
+            x: List of element compositions (atomic fractions) in the alloy
+            
+        Returns:
+            Normalized scalar objective value (higher is better)
+        '''
+        # Pad composition with zeros if shorter than total elements
         if len(x) < ELEM_TOTAL:
             x = list(x) + [0.] * (ELEM_TOTAL - len(x))
-        _en_val = _en_func(x)
-        _mp_val = _mp_func(x)
-        _ap_val = _ap_func(x)
+            
+        # Predict individual properties using surrogate models
+        _en_val = _en_func(x)  # Enthalpy (energy storage capacity)
+        _mp_val = _mp_func(x)  # Martensite peak temperature
+        _ap_val = _ap_func(x)  # Austenite peak temperature
 
-        _mo_val = np.array([_en_val, 
-            _mo_scale[1] - abs(_ap_val - _mp_val), 
-            _mo_scale[2] - abs(_dest_T - (_mp_val + _ap_val) / 2)
+        # Calculate objective components:
+        _mo_val = np.array([
+            _en_val,  # 1. Enthalpy (higher is better, raw value)
+            _mo_scale[1] - abs(_ap_val - _mp_val),  # 2. Transformation hysteresis (narrower is better)
+            _mo_scale[2] - abs(_dest_T - (_mp_val + _ap_val) / 2)  # 3. Proximity to target temperature
         ])
 
+        # Normalize and average the components to get final objective
         return (_mo_val / _mo_scale).mean()
     
     return _mo_func
+
+"""
+NOTE: We do not use the following class.
+"""
 
 class State:
     def __init__(self, if_init: bool = False, 

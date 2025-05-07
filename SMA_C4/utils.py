@@ -1,3 +1,9 @@
+"""
+    This file contains black box test function for Bayesian optimization.
+
+    NOT USED IN THIS PROJECT.
+"""
+
 import random
 import joblib
 import torch

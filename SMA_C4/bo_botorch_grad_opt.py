@@ -23,6 +23,9 @@ from composition_bo import AbstractCompositionBayesianOptimization, ensure_rng
 from feature_functionals import (weight_avg_func_torch, delta_func_torch, max_func_torch, min_func_torch,
                                 range_func_torch, maxc_func_torch, minc_func_torch, rangec_func_torch)
 
+"""
+    Feature functions for gradient optimization
+"""
 feature_functions = [
     weight_avg_func_torch, 
     delta_func_torch, 
@@ -34,6 +37,9 @@ feature_functions = [
     rangec_func_torch
 ]
 
+"""
+    ListSet class for storing unique compositions
+"""
 class ListSet():
     def __init__(self):
         self._data_list = []
@@ -53,11 +59,15 @@ class ListSet():
     def get(self) -> List[List[float]]:
         return self._data_list
 
+"""
+    Feature gradient-based Bayesian optimization
+"""
 class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
     _comp_tolerance = 1e-6
     _default_inner_opt_num = 10
     _batch_q = 1
 
+    ''' material feature function types '''
     WEIGHT_AVG = 0
     DELTA = 1
     MAX = 2
@@ -68,7 +78,18 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
     RANGEC = 7
 
     def _apply_feature_func(self, func_type: int, comp: torch.Tensor, feat: torch.Tensor) -> torch.Tensor:
-        """根据函数类型应用相应的特征计算函数"""
+        """
+        Apply the corresponding feature calculation function based on the function type.
+
+        Parameters
+        ----------
+        func_type: int
+            The type of feature calculation function to apply.
+        comp: torch.Tensor
+            The composition tensor.
+        feat: torch.Tensor
+            The feature tensor.
+        """
         match func_type:
             case self.WEIGHT_AVG:
                 return weight_avg_func_torch(comp, feat)
@@ -98,6 +119,19 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         self._sel_elem_features = torch.from_numpy(self._sel_elem_features).requires_grad_(False)
 
     def cal_elemental_feature(self, comp) -> torch.Tensor:
+        """
+        Calculate the elemental features for a given composition.
+
+        Parameters
+        ----------
+        comp: numpy array or torch.Tensor
+            The composition to calculate the elemental features for.
+
+        Returns
+        -------
+        torch.Tensor
+            The elemental features for the given composition.
+        """
         if not isinstance(comp, torch.Tensor):
             comp = torch.from_numpy(np.array(comp)).requires_grad_(False)
         
@@ -113,7 +147,14 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
 
     
     def update_elem_feat_bounds(self, elem_feat_arr: torch.Tensor):
-        ''' Pytorch tensorized version for updating bounds of elemental features '''
+        """
+        Update the bounds of elemental features.
+
+        Parameters
+        ----------
+        elem_feat_arr: torch.Tensor
+            The array of elemental features.    
+        """
         _feat_min_bounds = elem_feat_arr.min(dim = 0).values
         _feat_max_bounds = elem_feat_arr.max(dim = 0).values
         
@@ -135,9 +176,11 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
     #     return a * _cdf_func(z) + std * _pdf_func(z)
 
     def ucb_acqf(self, mean: torch.Tensor, std: torch.Tensor, kappa = 1.92) -> torch.Tensor:
+        """ Differentiable UCB acquisition function. """
         return mean + kappa * std
     
     def poi_acqf(self, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+        """ Differentiable POI acquisition function. """
         _cdf_func = lambda x: self._norm_dist.cdf(x)
         poi_vals = torch.zeros_like(mean)
         mask = std > 1e-6
@@ -147,13 +190,19 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         return poi_vals
     
     def predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        ''' 
-            GPR prediction.
-            Parameters
-            ----------
-            elem_feat: numpy array
-                unseen unnormalized elemental feature 
-        '''
+        """
+        GPR prediction.
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The input tensor.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor]
+            The mean and standard deviation of the GPR prediction.
+        """
         x = self.standardize(x.reshape(-1, self._sel_elem_feat_num))
         y_posterior = self._gpr.posterior(x)
         y_mean = y_posterior.mean
@@ -161,7 +210,20 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         return y_mean.flatten(), y_std.flatten()
 
     def generate_random_initial_guess(self):
-        ''' Generate one random composition '''
+        """
+        Generate one random composition.
+        In the 4-component SMA case, the elements are Ti, Ni, Cu, Hf.
+        Constraints:
+            Ti_equivalent + Ni_equivalent == 1
+            Cu replaces Ni
+            Hf replaces Ti
+        Rejection sampling in this case is equivalent to sampling from a 3-d hyper-rectangle.
+
+        Returns
+        -------
+        numpy array
+            The random composition.
+        """
         random_state = ensure_rng(None)
         _bounds = np.array([
             [1 - NI_MAX, TI_MAX], [1 - NI_MAX, TI_MAX], [CU_MIN, CU_MAX], [HF_MIN, HF_MAX]
@@ -181,7 +243,13 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         return _comp
 
     def round_composition(self, comp: List[float]) -> List[float]:
-        ''' Round an arbitrary composition to the pre-defined composition accuracy. '''
+        """
+        Round an arbitrary composition to the pre-defined composition accuracy.
+
+        Parameters
+        ----------
+        comp: List[float]
+        """
         def _single_comp_round(_c, _elem_idx):
             x_low_neighbor = math.floor(_c / COMPOSITION_INTERVAL) * COMPOSITION_INTERVAL
             x_high_neighbor = math.ceil(_c / COMPOSITION_INTERVAL) * COMPOSITION_INTERVAL
@@ -194,8 +262,15 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         return _potential_comps[mask]
 
     def suggest_next_x(self) -> List[float]:
-        ''' Inner argmax of acquisition function by enumeration of all possible compositions '''
-        
+        """
+        Inner argmax of acquisition function by enumeration of all possible compositions.
+
+        Returns
+        -------
+        List[float]
+            The next composition to evaluate.
+        """
+
         ''' scipy constraints for alloy compositions '''
         constraints = [
             {   # sum = 1.0
@@ -216,7 +291,13 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         ]
 
         def f(comp):
-            ''' composition -> atomic features -> standardized -> mean, std -> (acq_func_val, acq_func_grad_val) '''
+            """
+            Composition -> material features -> Standardized -> Mean, Std -> (acq_func_val, acq_func_grad_val)
+
+            Parameters
+            ----------
+            comp: numpy array
+            """
             comp_tensor = (
                 torch.from_numpy(comp)
                 .contiguous()
@@ -236,7 +317,7 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
 
         _rounded_comps = ListSet()
         for opt_no in range(self._default_inner_opt_num):
-            ''' single optimization '''
+            ''' generate random initial guess '''
             x0 = self.generate_random_initial_guess()
 
             ''' scipy optimize '''
@@ -259,7 +340,7 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         mean, std = self.predict(a_feat)
         ei_vals = self.ei_acqf(mean, std).detach().numpy().flatten()
         
-        # find the most promising un-tested comp
+        """ find the most promising un-tested comp """
         _desc_idxs = np.argsort(ei_vals)[::-1]
         for _i in _desc_idxs:
             _comp = _rounded_comps[_i]
@@ -269,7 +350,7 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
         raise Exception('Big logic leak, should never run this line.')
     
     def run_batch(self):
-        ''' Batch version '''
+        """ Batch version """
         _local_id = str(uuid.uuid4())[:8]
 
         ''' 1. identify important elemental feature subset '''
@@ -302,6 +383,7 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
             logger.info(f'{_local_id} - round {self.exp_round}, best-so-far {self.best_so_far}')
 
     def save(self):
+        """ Save the experiment history and target history. """
         joblib.dump(
             (self._exp_comp_history, self._exp_target_history),
             f'{str(uuid.uuid4())[:8]}-ucb-{self._init_seed}-exp-{self._init_rand_num}-{self._total_exp_num}-inner-{self._default_inner_opt_num}-q-{self._batch_q}.pkl'
@@ -309,7 +391,7 @@ class GradOptBayesianOptimization(AbstractCompositionBayesianOptimization):
 
 @ray.remote
 def serial_job(random_seed):
-    # 直接创建普通实例
+    """ Serial version """
     gradopt_BO = GradOptBayesianOptimization(
         init_seed=random_seed, 
         init_rand_num=40, 
@@ -324,7 +406,7 @@ if __name__ == '__main__':
 
     ray.init(num_cpus = num_cpus)
     try:
-        # 并行执行多个serial_job
+        """ Parallel execution of multiple serial_job instances. """
         ray.get([
             serial_job.remote(random_seed) 
             for random_seed in range(num_jobs)

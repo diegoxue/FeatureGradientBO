@@ -1,18 +1,24 @@
+"""
+    This script reads the results of Bayesian optimization from a given path
+    and processes them to generate a trajectory of BSF values, with mean and std.
+"""
+
 from glob import glob
 import os
 import random
 from joblib import load
 import numpy as np
 
-grad_path = 'results\\results_budget_80_20241118\\*pkl'
+grad_path = 'path_to_bo_results\\*pkl'
 
 def traj_proc(blend_path):
     data = []
     for p in glob(blend_path):
+        """
+            _x: (num_samples, num_elements), 
+            _p: (num_samples, ) : property values
+        """
         _x, _p = load(p)
-        # _rd_p = _p[:27]
-        # random.shuffle(_rd_p)
-        # _p = _rd_p + _p[27:]
         data.append(np.maximum.accumulate(_p))
 
     data = np.array(data)
@@ -22,10 +28,6 @@ def traj_proc(blend_path):
     ), axis = -1)
 
     return data
-
-    # rand_seed_header = [-3, -2, -1] + [int(p.split('-')[2]) for p in glob(blend_path)]
-
-    # return np.vstack((rand_seed_header, data))
 
 save_path = os.path.join(os.path.dirname(grad_path), '~res_sep.txt')
 np.savetxt(save_path, traj_proc(grad_path), delimiter = '\t')
