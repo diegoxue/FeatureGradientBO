@@ -129,6 +129,20 @@ Here's how to implement the feature gradient approach for a new alloy system:
 4. **Running Optimization**:
    - Create a script similar to the main function in `bo_botorch_grad_opt.py` that uses your new class
 
+### Using the Provided Feature Pool
+Our repository includes a pre-compiled pool of 30 material features commonly used for metallic materials design. These features are stored in the `data/` directory and cover properties such as:
+- Atomic radii, radius differences, electronegativity and electronegativity differences
+- Various transformations (min, max, average, etc.) of elemental properties
+
+### Extending the Feature Set
+To implement this approach for other material systems or applications:
+
+1. **Add New Features**: Extend the feature tables in the `data/` directory by adding rows for new elements or columns for additional properties.
+   
+2. **Define Custom Feature Transformations**: If needed, implement custom feature transformation functions in `feature_functionals.py` .
+
+3. **Feature Selection**: We provide a standardized genetic algorithm-based feature selection tool (`feature_selection_ga.py`) to identify the most relevant subset of features for your specific application.
+
 ### Benefits of This Approach
 
 The modular design of this framework allows you to:
