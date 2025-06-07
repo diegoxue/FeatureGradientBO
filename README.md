@@ -120,7 +120,7 @@ Here's how to implement the feature gradient approach for a new alloy system:
 3. **Customize These Key Components**:
    a. **Composition Space Definition**:
       - Define the valid elements and their concentration ranges
-      - Implement any HEA-specific constraints (e.g., configurational entropy thresholds), modify both AbstractCompositionBayesianOptimization and environment.py
+      - Implement any alloy-specific constraints (e.g., configurational entropy thresholds), modify both AbstractCompositionBayesianOptimization and environment.py
 
    b. **Feature Selection**:
       - Use the genetic algorithm framework in `feature_selection_ga.py` for feature subset selection
